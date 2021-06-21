@@ -1,0 +1,76 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.33.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 59fbf6ef9f18ae9e78a170226027065c0e6cac30741cce5673d35c437ba3f5ef
+
+name:           scheme-register-simulator
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/scheme-register-simulator#readme>
+homepage:       https://github.com/githubuser/scheme-register-simulator#readme
+bug-reports:    https://github.com/githubuser/scheme-register-simulator/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2021 Author name here
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/scheme-register-simulator
+
+library
+  exposed-modules:
+      Assemble
+      Global
+      Instruction
+      Lib
+      Lib.SchemeSyntax
+      Machine
+      Parser
+      Register
+      ScmSimulator
+  other-modules:
+      Paths_scheme_register_simulator
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , containers
+    , mtl
+  default-language: Haskell2010
+
+executable scheme-register-simulator-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_scheme_register_simulator
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , containers
+    , mtl
+    , scheme-register-simulator
+  default-language: Haskell2010
+
+test-suite scheme-register-simulator-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_scheme_register_simulator
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , containers
+    , mtl
+    , scheme-register-simulator
+  default-language: Haskell2010
