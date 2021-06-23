@@ -19,6 +19,7 @@ data InstValue = ISymbol String
                -- 上面为 scheme 中的值，以下为汇编语言的中的值
                | IRegLabel String
                | ILabel String
+               | IVarible String
                deriving Show
 
 instance Eq InstValue where

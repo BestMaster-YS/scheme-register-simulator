@@ -3,6 +3,8 @@
 
 module Parser where
 
+import System.IO.Unsafe
+import Data.Foldable
 import Control.Monad ( ap, replicateM )
 import Control.Applicative
     ( Applicative(liftA2), liftA, liftA3, Alternative(..) )
@@ -44,14 +46,17 @@ space = satisfy (==' ')
 spaces :: Parser String
 spaces = many space
 
+spacesOrLineBreak :: Parser String
+spacesOrLineBreak = many (space <|> char' '\n')
+
 char :: Parser Char
-char = satisfy isAlpha <|> satisfy isDigit <|> char' '-'
+char = satisfy (\c -> isAlpha c || isDigit c || c == '-' || c == '_')
 
 char' :: Char -> Parser Char
 char' c = satisfy (==c)
 
 word :: Parser String
-word = many char
+word = some char
 
 parseSeq :: Parser a -> Parser [a] -> Parser [a]
 parseSeq = liftA2 (:)
@@ -59,8 +64,8 @@ parseSeq = liftA2 (:)
 string :: String -> Parser String
 string = foldr (parseSeq . (\c -> satisfy (==c))) (pure "")
 
-between :: Parser a -> Parser b -> Parser c -> Parser c
-between a b c = a *>c <* b
+between :: Parser a -> Parser b -> Parser c -> Parser b
+between a b c = a *> b <* c
 
 parseDigit :: Parser Char
 parseDigit = satisfy isDigit
@@ -95,20 +100,36 @@ betweenbracket parse = satisfy (=='(') *> parse <* satisfy (==')')
 parseAssign :: Parser String
 parseAssign = string "assign"
 
+{- |
+
+>>> runParser parseReg "(reg \n name)"
+Just ("name","")
+
+-}
 -- (reg name) 形式
 parseReg :: Parser String
-parseReg =  betweenbracket (string "reg" *> spaces *> word)
+parseReg =  betweenbracket (string "reg" *> spacesOrLineBreak *> word)
 
 parseRegInst :: Parser Reg
 parseRegInst = parseReg >>= (return . Reg)
 
+-- (label label-name)
 parseLabelStr :: Parser String
-parseLabelStr = betweenbracket (string "label" *> spaces *> word)
+parseLabelStr = betweenbracket (string "label" *> spacesOrLineBreak *> word)
 
+
+{- |
+>>> runParser parseComment ";; test comment \n"
+Just ("","")
+-}
 parseComment :: Parser String
 parseComment = liftA3 (\_ _ _ -> "") (some (char' ';')) (many (satisfy (\a -> isAscii a && a /= '\n'))) (char' '\n')
 
 -- instValue 由原生数据以及 Reg 和 Label，原生数据都是由 const 包裹住的
+
+parsePrimitiveString :: Parser String
+parsePrimitiveString = some (satisfy (\a -> isAscii a && a /= '\"'))
+
 parsePrimitiveInstValue :: Parser InstValue
 parsePrimitiveInstValue =
   (isymbol >>= (return . ISymbol)) <|>
@@ -117,10 +138,11 @@ parsePrimitiveInstValue =
   (true >>= (return . IBool)) <|>
   (false >>= (return . IBool)) <|>
   (nil >>= const (return INull)) <|>
-  (between (string "\"") word (string "\"") >>= (return . IString))
+  (between (char' '\"') parsePrimitiveString (char' '\"') >>= (return . IString)) <|>
+  (word >>= (return . IVarible))
 
 parseConst :: Parser InstValue
-parseConst = betweenbracket (string "const" *> spaces *> parsePrimitiveInstValue)
+parseConst = betweenbracket (string "const" *> spacesOrLineBreak *> parsePrimitiveInstValue)
 
 parseInstValue :: Parser InstValue
 parseInstValue =
@@ -137,42 +159,42 @@ parseLabel :: Parser Label
 parseLabel = parseLabelStr >>= (return . Label)
 
 parseAssignRegPrefix :: Parser Reg
-parseAssignRegPrefix = parseAssign *> spaces *> parseRegString
+parseAssignRegPrefix = parseAssign *> spacesOrLineBreak *> parseRegString
 
 -- op 可能为字母或符号, 使用 asill 判断，但是不能为右括号，不然解析不会停止
 parseOpStr :: Parser String
 parseOpStr = many (satisfy (\c -> isAscii c && (c /= ')')))
 
 parseOp :: Parser Op
-parseOp = betweenbracket (string "op" *> spaces *> parseOpStr) >>= (return . Op)
+parseOp = betweenbracket (string "op" *> spacesOrLineBreak *> parseOpStr) >>= (return . Op)
 
 parseInstValueList :: Parser [InstValue]
-parseInstValueList = some (spaces *> parseInstValue)
+parseInstValueList = many (spacesOrLineBreak *> parseInstValue)
 
 parsePerformPrefix :: Parser String
-parsePerformPrefix = liftA2 (++) (string "perform") spaces
+parsePerformPrefix = liftA2 (++) (string "perform") spacesOrLineBreak
 
 parseTestPrefix :: Parser String
-parseTestPrefix = liftA2 (++) (string "test") spaces
+parseTestPrefix = liftA2 (++) (string "test") spacesOrLineBreak
 
 parseBranchPrefix :: Parser String
-parseBranchPrefix = liftA2 (++) (string "branch") spaces
+parseBranchPrefix = liftA2 (++) (string "branch") spacesOrLineBreak
 
 parseGotoPrefix :: Parser String
-parseGotoPrefix = liftA2 (++) (string "goto") spaces
+parseGotoPrefix = liftA2 (++) (string "goto") spacesOrLineBreak
 
 parseSavePerfix :: Parser String
-parseSavePerfix = liftA2 (++) (string "save") spaces
+parseSavePerfix = liftA2 (++) (string "save") spacesOrLineBreak
 
 parseRestorePerfix :: Parser String
-parseRestorePerfix = liftA2 (++) (string "restore") spaces
+parseRestorePerfix = liftA2 (++) (string "restore") spacesOrLineBreak
 
 parseInst :: Parser Inst
 parseInst = betweenbracket (
-  liftA2 AssignRegReg parseAssignRegPrefix (spaces *> parseRegInst) <|>
-  liftA2 AssignRegConst parseAssignRegPrefix (spaces *> parseConst) <|>
-  liftA2 AssignRegLabel parseAssignRegPrefix (spaces *> parseLabel) <|>
-  liftA3 AssignRegOpResult parseAssignRegPrefix (spaces *> parseOp) parseInstValueList <|>
+  liftA2 AssignRegReg parseAssignRegPrefix (spacesOrLineBreak *> parseRegInst) <|>
+  liftA2 AssignRegConst parseAssignRegPrefix (spacesOrLineBreak *> parseConst) <|>
+  liftA2 AssignRegLabel parseAssignRegPrefix (spacesOrLineBreak *> parseLabel) <|>
+  liftA3 AssignRegOpResult parseAssignRegPrefix (spacesOrLineBreak *> parseOp) parseInstValueList <|>
   liftA2 Perform (parsePerformPrefix *> parseOp) parseInstValueList <|>
   liftA2 Test (parseTestPrefix *> parseOp) parseInstValueList <|>
   fmap Branch (parseBranchPrefix *> parseLabel) <|>
@@ -180,21 +202,26 @@ parseInst = betweenbracket (
   fmap GotoReg (parseGotoPrefix *> parseRegInst) <|>
   fmap SaveReg (parseSavePerfix *> parseRegString) <|>
   fmap RestoreReg (parseRestorePerfix *> parseRegString)
-  )
+  ) <* spacesOrLineBreak
 
 parseFile :: String -> [Either Label Inst]
 parseFile content = map (\input ->
-  case runParser parseLine input of
+  case runParser parseWholeInst input of
     Nothing -> error ("parseLine error: " ++ input)
     Just a -> fst a
   )
   (filter (/="")  (lines content))
 
-parseLine :: Parser (Either Label Inst)
-parseLine =
-  (parseInst >>= (return . Right)) <|>
-  (word >>= (return . (Left . Label)))
+parseWholeFile :: Parser [Either Label Inst]
+parseWholeFile =
+  liftA2 (:) parseWholeInst parseWholeFile <|>
+  liftA2 (\_ x -> x) parseComment (spacesOrLineBreak *> parseWholeFile) <|>
+  return []
 
+parseWholeInst :: Parser (Either Label Inst)
+parseWholeInst =
+  (parseInst >>= (return . Right)) <|>
+  ((word >>= (return . (Left . Label))) <* spacesOrLineBreak)
 
 testARR :: Parser Inst
 testARR = betweenbracket (liftA2 AssignRegReg parseAssignRegPrefix parseRegInst)
@@ -210,7 +237,14 @@ testTOP = betweenbracket (liftA2 Test (parseTestPrefix *> parseOp) parseInstValu
 
 testParseFile :: IO ()
 testParseFile = do
-  content <- readFile "test1.hcm"
-  let r = parseFile content
-  print r
-  return ()
+  content <- readFile "scheme.hcm"
+  let r = runParser parseWholeFile content
+  case r of
+    Nothing -> print "Nothing"
+    Just (list, rest) -> do
+      traverse_ print list
+      print rest
+      return ()
+
+testUnsafe :: IO String
+testUnsafe = readFile "scheme.hcm"
