@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 59fbf6ef9f18ae9e78a170226027065c0e6cac30741cce5673d35c437ba3f5ef
+-- hash: e3cc4e4335da2f61050687ef09a1ab9c7e6f2f697ff90f2f599655c266dff154
 
 name:           scheme-register-simulator
 version:        0.1.0.0
@@ -30,11 +30,14 @@ library
       Assemble
       Global
       Instruction
+      Language.IO
+      Language.Parser
+      Language.Syntax
       Lib
-      Lib.SchemeSyntax
       Machine
       Parser
       Register
+      Runtime
       ScmSimulator
   other-modules:
       Paths_scheme_register_simulator

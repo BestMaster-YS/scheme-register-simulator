@@ -2,7 +2,7 @@ module ScmSimulator (run) where
 
 import Control.Monad.State ( runState, StateT )
 import System.Environment ( getArgs )
-import Parser ( parseFile, runParser )
+import Parser ( parseWholeFile, runParser, ParserResult(..) )
 import Assemble ( assemble, extractLabels, assembleS )
 import Instruction (InstValue(..), Inst(..), Label(..), Reg(..), Op(..) )
 import Machine (lookupRegister, initMachine, allocRegister, getFlag, Machine(..) )
@@ -24,11 +24,15 @@ run = do
     [] -> putStrLn "Please run this program with filename be the arguments"
     (filename:_) -> do
       content <- readFile filename
-      let list = parseFile content
-      print list
-      let m1 = allocRegister "a" (IInteger 206) initMachine
-      let m2 = allocRegister "b" (IInteger 40) m1
-      let (_, m3) = runState (assembleS list) m2
-      print (lookupRegister "a" m3)
-      print (lookupRegister "b" m3)
-      putStrLn "done"
+      let result = runParser parseWholeFile content
+      case result of
+        ParseResult list _ -> do
+          print list
+          let m1 = allocRegister "a" (IInteger 206) initMachine
+          let m2 = allocRegister "b" (IInteger 40) m1
+          let (_, m3) = runState (assembleS list) m2
+          print (lookupRegister "a" m3)
+          print (lookupRegister "b" m3)
+          putStrLn "done"
+        error@(ParseError e a) -> print error
+        part@ParsePart -> print part

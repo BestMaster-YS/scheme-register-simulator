@@ -12,35 +12,59 @@ import Data.Char ( isDigit, isAlpha, isAscii )
 import Instruction
     ( Inst(..), InstValue(..), Label(..), Op(..), Reg(..) )
 
-newtype Parser a = Parser { runParser :: String -> Maybe (a, String) } deriving Functor
+-- 重写 Parser , Maybe 不满足现在的需求
+
+type Input = String
+unknown :: String
+unknown = "Unknown"
+data ParserResult a = ParseResult a Input
+                    -- 以下皆为错误信息，但是错误含义不一样
+                    | ParseError
+                      Input -- 期待输入，有时候可能没有
+                      Input -- 实际输入
+                    | ParsePart -- parse part
+
+instance (Show a) => Show (ParserResult a) where
+  show (ParseResult a i) = "Result: " ++ show a ++ ", rest: " ++ i
+  show (ParseError e a) = "Error: expect " ++ show e ++ ", actual " ++ show a
+  show ParsePart = "input uncompleted"
+
+instance Functor ParserResult where
+  fmap f (ParseResult a i) = ParseResult (f a) i
+  fmap f (ParseError e a) = ParseError e a
+  fmap f ParsePart = ParsePart
+
+newtype Parser a = Parser { runParser :: String -> ParserResult a } deriving Functor
 
 instance Applicative Parser where
   pure = return
   (<*>) pf pa = pf >>= (`fmap` pa)
 
 instance Monad Parser where
-  return a = Parser $ \input -> Just (a, input)
+  return a = Parser $ \input -> ParseResult a input
   parseA >>= f = Parser $ \input ->
     let res = runParser parseA input
     in case res of
-      Nothing -> Nothing
-      Just (a, rest) -> runParser (f a) rest
+      ParseResult a next -> runParser (f a) next
+      ParseError e a -> ParseError e a
+      ParsePart -> ParsePart
 
 instance Alternative Parser where
-  empty = Parser $ const Nothing
+  empty = Parser $ const ParsePart
   (<|>) parseA parseB = Parser $ \input ->
     let res = runParser parseA input
     in case res of
-      Just a -> Just a
-      Nothing -> runParser parseB input
+      ParseResult a next -> ParseResult a next
+      ParseError e a -> runParser parseB input
+      ParsePart -> runParser parseB input
 
-satisfy :: (Char -> Bool) -> Parser Char
-satisfy p = Parser $ \case
-  [] -> Nothing
-  (a:rest) -> if p a then Just (a, rest) else Nothing
+satisfy :: String -> (Char -> Bool) -> Parser Char
+satisfy error p = Parser $ \case
+  [] -> ParsePart
+  (a:rest) -> if p a then ParseResult a rest else ParseError error (show a)
 
 space :: Parser Char
-space = satisfy (==' ')
+space = satisfy "space" (==' ')
 
 -- some is one or more, many is 0 or more
 spaces :: Parser String
@@ -50,10 +74,10 @@ spacesOrLineBreak :: Parser String
 spacesOrLineBreak = many (space <|> char' '\n')
 
 char :: Parser Char
-char = satisfy (\c -> isAlpha c || isDigit c || c == '-' || c == '_')
+char = satisfy "alpha, digit, -, _" (\c -> isAlpha c || isDigit c || c == '-' || c == '_')
 
 char' :: Char -> Parser Char
-char' c = satisfy (==c)
+char' c = satisfy (show c) (==c)
 
 word :: Parser String
 word = some char
@@ -62,13 +86,13 @@ parseSeq :: Parser a -> Parser [a] -> Parser [a]
 parseSeq = liftA2 (:)
 
 string :: String -> Parser String
-string = foldr (parseSeq . (\c -> satisfy (==c))) (pure "")
+string = foldr (parseSeq . (\c -> satisfy (show c) (==c))) (pure "")
 
 between :: Parser a -> Parser b -> Parser c -> Parser b
 between a b c = a *> b <* c
 
 parseDigit :: Parser Char
-parseDigit = satisfy isDigit
+parseDigit = satisfy "digit" isDigit
 
 integer :: Parser Integer
 integer = some parseDigit >>= (return . read)
@@ -95,7 +119,7 @@ isymbol :: Parser String
 isymbol = char' '\'' *> word
 
 betweenbracket :: Parser a -> Parser a
-betweenbracket parse = satisfy (=='(') *> parse <* satisfy (==')')
+betweenbracket parse = satisfy "(" (=='(') *> parse <* satisfy ")" (==')')
 
 parseAssign :: Parser String
 parseAssign = string "assign"
@@ -123,12 +147,16 @@ parseLabelStr = betweenbracket (string "label" *> spacesOrLineBreak *> word)
 Just ("","")
 -}
 parseComment :: Parser String
-parseComment = liftA3 (\_ _ _ -> "") (some (char' ';')) (many (satisfy (\a -> isAscii a && a /= '\n'))) (char' '\n')
+parseComment =
+  liftA3 (\_ _ _ -> "")
+    (some (char' ';'))
+    (many (satisfy "asicc && not \\n" (\a -> isAscii a && a /= '\n')))
+    (char' '\n')
 
 -- instValue 由原生数据以及 Reg 和 Label，原生数据都是由 const 包裹住的
 
 parsePrimitiveString :: Parser String
-parsePrimitiveString = some (satisfy (\a -> isAscii a && a /= '\"'))
+parsePrimitiveString = some (satisfy "ascii && not \"" (\a -> isAscii a && a /= '\"'))
 
 parsePrimitiveInstValue :: Parser InstValue
 parsePrimitiveInstValue =
@@ -163,7 +191,7 @@ parseAssignRegPrefix = parseAssign *> spacesOrLineBreak *> parseRegString
 
 -- op 可能为字母或符号, 使用 asill 判断，但是不能为右括号，不然解析不会停止
 parseOpStr :: Parser String
-parseOpStr = many (satisfy (\c -> isAscii c && (c /= ')')))
+parseOpStr = many (satisfy "ascii && not )" (\c -> isAscii c && (c /= ')')))
 
 parseOp :: Parser Op
 parseOp = betweenbracket (string "op" *> spacesOrLineBreak *> parseOpStr) >>= (return . Op)
@@ -204,14 +232,6 @@ parseInst = betweenbracket (
   fmap RestoreReg (parseRestorePerfix *> parseRegString)
   ) <* spacesOrLineBreak
 
-parseFile :: String -> [Either Label Inst]
-parseFile content = map (\input ->
-  case runParser parseWholeInst input of
-    Nothing -> error ("parseLine error: " ++ input)
-    Just a -> fst a
-  )
-  (filter (/="")  (lines content))
-
 parseWholeFile :: Parser [Either Label Inst]
 parseWholeFile =
   liftA2 (:) parseWholeInst parseWholeFile <|>
@@ -240,11 +260,12 @@ testParseFile = do
   content <- readFile "scheme.hcm"
   let r = runParser parseWholeFile content
   case r of
-    Nothing -> print "Nothing"
-    Just (list, rest) -> do
+    ParseError e a -> print ("parse error: expect: " ++ e ++ ", actual: " ++ a)
+    ParseResult list next -> do
       traverse_ print list
-      print rest
+      print next
+      return ()
+    a@ParsePart -> do
+      print a
       return ()
 
-testUnsafe :: IO String
-testUnsafe = readFile "scheme.hcm"
